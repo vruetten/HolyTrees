@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "holytrees"
+version = "0.1.0"
+description = "Pure-Python inspection of Tim Holy's tiled-NMF pipeline output (TileTree .jld2 runs)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Virginia Ruetten" }]
+keywords = ["NMF", "calcium-imaging", "TileTree", "neuroscience", "jld2"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "h5py>=3.8",
+    "matplotlib>=3.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.urls]
+Homepage = "https://github.com/HolyLab"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/holytrees"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = [
+    "E741",   # ambiguous variable names (l, I) are fine for math/index code
+    "B905",   # zip(strict=) — lengths are guaranteed equal by construction here
+    "UP038",  # isinstance(x, (A, B)) tuple form is clearer/faster than A | B
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.venv/
+
+# Scratch figure output from demo.py (only the curated gallery in figures/ is tracked)
+figures/scratch/
+*.scratch.png
+
+# OS
+.DS_Store
