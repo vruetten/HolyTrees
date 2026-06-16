@@ -25,7 +25,14 @@ from __future__ import annotations
 
 import logging
 
-from .analysis import cell_lobes, flag_overmerged, label_components
+from .analysis import (
+    cell_holes,
+    cell_lobes,
+    flag_holed,
+    flag_overmerged,
+    label_components,
+    label_components_full,
+)
 from .cells import (
     Cell,
     data_matrix,
@@ -97,6 +104,9 @@ __all__ = [
     "paint_cells",
     "cell_lobes",
     "flag_overmerged",
+    "cell_holes",
+    "flag_holed",
+    "label_components_full",
     "label_components",
     "show_image",
     "show_cells_located",

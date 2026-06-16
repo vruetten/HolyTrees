@@ -554,6 +554,27 @@ class Run:
 
         return flag_overmerged(self, min_lobes=min_lobes, min_frac=min_frac, indices=indices)
 
+    def cell_holes(self, k: int, *, min_hole_px: int = 1, threshold: float = 0.0) -> int:
+        """Number of enclosed background holes in cell ``k``'s footprint.
+
+        ``0`` is a simply-connected footprint; ``>= 1`` flags a ring/loop that
+        wraps empty space. See :func:`holytrees.analysis.cell_holes`.
+        """
+        from .analysis import cell_holes
+
+        return cell_holes(self.cells[k], min_hole_px=min_hole_px, threshold=threshold)
+
+    def flag_holed(self, *, min_holes: int = 1, min_hole_px: int = 4, threshold: float = 0.0, indices=None):
+        """List cells whose footprint encloses a hole, largest hole first.
+
+        See :func:`holytrees.analysis.flag_holed`.
+        """
+        from .analysis import flag_holed
+
+        return flag_holed(
+            self, min_holes=min_holes, min_hole_px=min_hole_px, threshold=threshold, indices=indices
+        )
+
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         kind = "3D" if self.is3d else "2D"
         return (
