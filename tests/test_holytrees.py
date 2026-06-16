@@ -1,3 +1,4 @@
+#%%
 """Self-contained tests against the committed toy run fixture.
 
 The fixture ``tests/data/run_20260614_182728.jld2`` is a small (~1.9 MB) real
@@ -12,7 +13,7 @@ import pickle
 
 import matplotlib
 
-matplotlib.use("Agg")  # headless rendering for viz smoke tests
+# matplotlib.use("Agg")  # headless rendering for viz smoke tests
 
 import numpy as np
 import pytest
@@ -31,7 +32,7 @@ F338 = (
 @pytest.fixture(scope="module")
 def run() -> Run:
     return ht.load(FIXTURE)
-
+#%%
 
 # ── loading & summary ─────────────────────────────────────────────────────────
 def test_load_summary(run):
@@ -205,3 +206,5 @@ def _bare_run(tt: TileTree, spacesize) -> Run:
         deviation_method=None, elapsed_s=None, schema_version=1, path="<synthetic>",
         origin=tuple(0 for _ in spacesize),
     )
+
+# %%

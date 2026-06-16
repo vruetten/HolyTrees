@@ -239,27 +239,92 @@ def show_cell(run: Run, k: int, *, anatomy=None, reduce="maxproj", ax=None, save
 # ──────────────────────────────────────────────────────────────────────────────
 # raster
 # ──────────────────────────────────────────────────────────────────────────────
-def cell_raster(run: Run, *, normalize=True, cmap="magma", ax=None, save=None, title=None):
+def _raster_clip(M: np.ndarray, clip, symmetric):
+    """Resolve ``(vmin, vmax)`` color limits for a raster from a ``clip`` spec.
+
+    ``clip`` is given in **percentile** units (0-100): ``"auto"``, ``None``, a
+    scalar ``p``, or a ``(lo, hi)`` pair. See :func:`cell_raster` for semantics.
+    Returns ``(None, None)`` to mean "no clipping" (let matplotlib autoscale).
+    """
+    if clip is None or M.size == 0:
+        return None, None
+    finite = M[np.isfinite(M)]
+    if finite.size == 0:
+        return None, None
+    has_neg = bool((finite < 0).any())
+    if isinstance(clip, str):
+        if clip != "auto":
+            raise ValueError(f"clip string must be 'auto', got {clip!r}")
+        if not has_neg:
+            return None, None
+        clip, symmetric = 99.0, True
+    if isinstance(clip, (tuple, list)):
+        lo, hi = (float(x) for x in clip)
+        vmin, vmax = np.nanpercentile(finite, [lo, hi])
+        return float(vmin), float(vmax)
+    p = float(clip)
+    if symmetric is None:
+        symmetric = has_neg
+    if symmetric:
+        lim = float(np.nanpercentile(np.abs(finite), p))
+        return -lim, lim
+    vmin, vmax = np.nanpercentile(finite, [100.0 - p, p])
+    return float(vmin), float(vmax)
+
+
+def cell_raster(run: Run, *, M=None, normalize=True, cmap="coolwarm", vmin=None, vmax=None,
+                clip="auto", symmetric=None, ax=None, save=None, title=None):
     """Raster image of the data matrix (cells x time).
 
     Parameters
     ----------
     run : Run
+    M : array_like, optional
+        A precomputed ``(ncells, ntimes)`` matrix to display (e.g. a normalized /
+        ΔF/F / z-scored version of ``run.traces``). When given it is shown as-is
+        (``normalize`` is ignored). When ``None`` (default), ``run.traces`` is used.
     normalize : bool, optional
-        Scale each cell's trace to ``[0, 1]`` (peak-normalized) for display.
-    cmap, ax, save, title
+        Only when ``M is None``: scale each cell's trace to ``[0, 1]``
+        (peak-normalized) for display.
+    cmap : str, optional
+        Colormap (default ``"coolwarm"``, a diverging map suited to signed data).
+    vmin, vmax : float, optional
+        Explicit color limits. If given, they take precedence over ``clip`` for
+        that side (set both to disable percentile clipping entirely).
+    clip : {"auto", None}, float, or (float, float), optional
+        Percentile-based color limits, used only where ``vmin``/``vmax`` are not
+        given:
+
+        - ``"auto"`` (default): if the data has negative values, clip
+          symmetrically at the 99th percentile of ``|M|`` (centers a diverging
+          colormap at zero); otherwise no clipping.
+        - a single number ``p``: clip at the ``p``-th percentile. Symmetric
+          (``±percentile(|M|, p)``) when ``symmetric`` is true, else
+          ``(percentile(M, 100-p), percentile(M, p))``.
+        - a pair ``(lo, hi)``: clip at ``(percentile(M, lo), percentile(M, hi))``.
+        - ``None``: no percentile clipping (autoscale to the data range).
+    symmetric : bool, optional
+        Force symmetric (``True``) or asymmetric (``False``) limits for a scalar
+        ``clip``. Default ``None`` infers symmetric when the data has negatives.
+    ax, save, title
 
     Returns
     -------
     (Figure, Axes)
     """
-    M = run.traces.astype(np.float32)
-    if normalize and M.size:
-        peak = M.max(axis=1, keepdims=True)
-        peak[peak == 0] = 1.0
-        M = M / peak
+    if M is None:
+        M = run.traces.astype(np.float32)
+        if normalize and M.size:
+            peak = M.max(axis=1, keepdims=True)
+            peak[peak == 0] = 1.0
+            M = M / peak
+    else:
+        M = np.asarray(M, dtype=np.float32)
+    cvmin, cvmax = _raster_clip(M, clip, symmetric)
+    vmin = cvmin if vmin is None else vmin
+    vmax = cvmax if vmax is None else vmax
     fig, ax = _axes(ax, figsize=(8, 5))
-    im = ax.imshow(M, aspect="auto", cmap=cmap, interpolation="nearest")
+    im = ax.imshow(M, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax, interpolation="nearest")
     ax.set_xlabel("time")
     ax.set_ylabel("cell")
     ax.set_title(title or f"data matrix ({M.shape[0]} cells x {M.shape[1]} time)")

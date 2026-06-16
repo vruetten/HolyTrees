@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 
+from .analysis import cell_lobes, flag_overmerged, label_components
 from .cells import (
     Cell,
     data_matrix,
@@ -94,6 +95,9 @@ __all__ = [
     "reconstruct_frame",
     "reconstruct_maxproj",
     "paint_cells",
+    "cell_lobes",
+    "flag_overmerged",
+    "label_components",
     "show_image",
     "show_cells_located",
     "project_cells",

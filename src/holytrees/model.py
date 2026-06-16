@@ -534,6 +534,26 @@ class Run:
 
         return cell_raster(self, **kw)
 
+    # ── connectivity diagnostics (delegate to analysis) ─────────────────────────
+    def cell_lobes(self, k: int, *, min_frac: float = 0.0) -> int:
+        """Number of connected lobes in cell ``k``'s footprint.
+
+        ``1`` is a normal connected cell; ``>= 2`` flags a disconnected
+        (over-merged) footprint. See :func:`holytrees.analysis.cell_lobes`.
+        """
+        from .analysis import cell_lobes
+
+        return cell_lobes(self.cells[k], min_frac=min_frac)
+
+    def flag_overmerged(self, *, min_lobes: int = 2, min_frac: float = 0.02, indices=None):
+        """List cells with disconnected (multi-lobe) footprints, largest first.
+
+        See :func:`holytrees.analysis.flag_overmerged`.
+        """
+        from .analysis import flag_overmerged
+
+        return flag_overmerged(self, min_lobes=min_lobes, min_frac=min_frac, indices=indices)
+
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         kind = "3D" if self.is3d else "2D"
         return (
