@@ -575,6 +575,37 @@ class Run:
             self, min_holes=min_holes, min_hole_px=min_hole_px, threshold=threshold, indices=indices
         )
 
+    def box_holes(self, k: int, *, tile=None, min_hole_cells: int = 1, threshold: float = 0.0) -> int:
+        """Number of empty tile-boxes cell ``k`` encircles on the original lattice.
+
+        The box-granularity hole the ``nohole`` merge gate controls; ``0`` is
+        hole-free. See :func:`holytrees.analysis.box_holes` /
+        :func:`holytrees.analysis.lattice_cellsize`.
+        """
+        from .analysis import box_holes, lattice_cellsize
+
+        cellsize = lattice_cellsize(self, tile)
+        return box_holes(self.cells[k], cellsize, min_hole_cells=min_hole_cells, threshold=threshold)
+
+    def flag_box_holed(
+        self, *, tile=None, min_holes: int = 1, min_hole_cells: int = 1, threshold: float = 0.0, indices=None
+    ):
+        """List cells that encircle an empty tile-box, most enclosed boxes first.
+
+        Box-level counterpart of :meth:`flag_holed`; empty for a ``nohole``-gated
+        run. See :func:`holytrees.analysis.flag_box_holed`.
+        """
+        from .analysis import flag_box_holed
+
+        return flag_box_holed(
+            self,
+            tile=tile,
+            min_holes=min_holes,
+            min_hole_cells=min_hole_cells,
+            threshold=threshold,
+            indices=indices,
+        )
+
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         kind = "3D" if self.is3d else "2D"
         return (

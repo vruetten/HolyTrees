@@ -6,6 +6,12 @@ even when their supports do not touch, producing a "cell" whose footprint is a
 patchwork of disconnected *lobes*. These helpers quantify that: count the
 connected components of a footprint and flag cells with more than one.
 
+Two flavors of *hole* diagnostic complement the lobe check: :func:`cell_holes`
+counts pixel-level voids a footprint encircles, while :func:`box_holes` /
+:func:`flag_box_holed` count voids at the granularity the ``nohole`` merge gate
+actually controls — empty *tile-boxes* on the original lattice that the cell's
+occupied boxes surround.
+
 Everything here is pure NumPy (no SciPy): connected components are found with a
 vectorized-edge union-find that works for 2D (4-connectivity) and 3D
 (6-connectivity) footprints alike.
@@ -214,7 +220,9 @@ def label_components_full(mask: np.ndarray, axes: tuple[int, ...]) -> tuple[np.n
     return labels.reshape(mask.shape), int(inv.max()) + 1
 
 
-def _enclosed_background(mask: np.ndarray) -> tuple[np.ndarray, int]:
+def _enclosed_background(
+    mask: np.ndarray, flood_axes: tuple[int, ...] | None = None
+) -> tuple[np.ndarray, int]:
     """Label background components of ``mask`` that are fully enclosed.
 
     Background (``~mask``) is labeled with **face** connectivity over the flood
@@ -224,11 +232,15 @@ def _enclosed_background(mask: np.ndarray) -> tuple[np.ndarray, int]:
     enclosed even if a diagonal corner is open (occupancy is correspondingly
     8-/26-connected) — a box hemmed in on all sides counts as a hole.
 
+    ``flood_axes`` restricts the connectivity/border to those axes (others are
+    "stacking" axes analyzed independently); defaults to all non-degenerate axes
+    (:func:`_flood_axes`).
+
     Returns ``(labels, nlabels)`` where ``labels`` is nonzero only on enclosed
     background voxels (relabeled ``1..nlabels``).
     """
     mask = np.asarray(mask, dtype=bool)
-    fa = _flood_axes(mask.shape)
+    fa = _flood_axes(mask.shape) if flood_axes is None else tuple(flood_axes)
     if not fa:
         return np.zeros(mask.shape, dtype=np.int64), 0
     bg = ~mask
@@ -354,6 +366,168 @@ def flag_holed(
     return flagged
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Box-level holes (the quantity the `nohole` merge gate actually controls)
+# ──────────────────────────────────────────────────────────────────────────────
+def lattice_cellsize(run: "Run", tile=None) -> tuple[int, ...]:
+    """Per-spatial-axis size of the original tile lattice, ``(Y, X[, Z])``.
+
+    The ``nohole`` gate reasons on the coarse grid of original tile-boxes, so the
+    box-level diagnostics need that lattice's cell size. Resolution order:
+
+    1. ``tile`` argument, if given (an int is broadcast to every spatial axis);
+    2. ``run.params['tile_size']``;
+    3. the most common box size among ``run.boxes_active`` (the fit-time tiles).
+
+    Raises ``ValueError`` if none of these is available.
+    """
+    ndim = run.ttree.spatial_ndim
+    if tile is not None:
+        if np.isscalar(tile):
+            return tuple(int(tile) for _ in range(ndim))
+        cs = tuple(int(x) for x in tile)
+        return cs[:ndim]
+    ts = (run.params or {}).get("tile_size")
+    if ts is not None:
+        return tuple(int(x) for x in ts)[:ndim]
+    boxes = getattr(run, "boxes_active", None)
+    if boxes:
+        dims = [tuple(int(d) for d in b.dims) for b in boxes]
+        # mode of each axis (tiles at the frame edge can be smaller)
+        return tuple(int(np.bincount([d[a] for d in dims]).argmax()) for a in range(ndim))
+    raise ValueError("cannot determine tile lattice size; pass tile=...")
+
+
+def _box_occupancy(cell: "Cell", cellsize, threshold: float = 0.0):
+    """Dense occupancy of the original tile lattice over a cell's bounding box.
+
+    A lattice cell is "occupied" if **any** footprint voxel above ``threshold``
+    falls in it. Returns ``(grid, flood_axes)`` where ``grid`` is a boolean array
+    spanning the cell's occupied lattice-cell bounding box and ``flood_axes`` are
+    the axes whose lattice size ``> 1`` (so a spaced/thin axis is treated
+    per-plane). Returns ``(None, ())`` for an empty footprint.
+    """
+    S = np.abs(np.asarray(cell.S, dtype=np.float64))
+    mask = S > threshold
+    if not mask.any():
+        return None, ()
+    nz = np.argwhere(mask)
+    starts = np.array([sl.start for sl in cell.box.slices], dtype=np.int64)
+    cs = np.array(cellsize, dtype=np.int64)
+    g = (nz + starts) // cs
+    gmin = g.min(axis=0)
+    grid = np.zeros(tuple((g.max(axis=0) - gmin + 1).tolist()), dtype=bool)
+    grid[tuple((g - gmin).T)] = True
+    flood_axes = tuple(a for a in range(grid.ndim) if cs[a] > 1)
+    return grid, flood_axes
+
+
+def box_holes(cell: "Cell", cellsize, *, min_hole_cells: int = 1, threshold: float = 0.0) -> int:
+    """Number of empty tile-boxes a cell's footprint *encircles* on the lattice.
+
+    This is the box-granularity hole the ``nohole`` merge gate targets: map the
+    footprint onto the original tile lattice (a box is occupied if any footprint
+    voxel lands in it), then count empty lattice boxes that the occupied boxes
+    enclose. Enclosure uses **face** connectivity (a box hemmed in on all four
+    sides is enclosed even if a diagonal corner is open), restricted to genuinely
+    tiled axes so a spaced z is treated plane-by-plane — exactly the gate's rule.
+
+    Parameters
+    ----------
+    cell : Cell
+    cellsize : int or tuple of int
+        Tile lattice cell size per spatial axis (e.g. ``(60, 60)``); see
+        :func:`lattice_cellsize`.
+    min_hole_cells : int, optional
+        Minimum size (in lattice boxes) for an enclosed void to count (default
+        ``1``, matching the gate).
+    threshold : float, optional
+        Footprint magnitude above which a voxel is "occupied" (default ``0.0``).
+
+    Returns
+    -------
+    int
+        Number of enclosed empty-box regions of at least ``min_hole_cells`` boxes.
+    """
+    grid, flood_axes = _box_occupancy(cell, cellsize, threshold=threshold)
+    if grid is None or not flood_axes:
+        return 0
+    labels, n = _enclosed_background(grid, flood_axes=flood_axes)
+    if n == 0:
+        return 0
+    if min_hole_cells <= 1:
+        return n
+    sizes = np.bincount(labels.ravel(), minlength=n + 1)[1:]
+    return int((sizes >= min_hole_cells).sum())
+
+
+def flag_box_holed(
+    run: "Run",
+    *,
+    tile=None,
+    min_holes: int = 1,
+    min_hole_cells: int = 1,
+    threshold: float = 0.0,
+    indices=None,
+) -> list[dict]:
+    """Find cells that encircle an empty tile-box (the box-level ``nohole`` metric).
+
+    Box-level counterpart of :func:`flag_holed`: scans the run on the original
+    tile lattice and returns cells whose occupied boxes enclose one or more empty
+    boxes, sorted by enclosed-box count (largest first). For a run merged with the
+    ``nohole`` gate this should be empty.
+
+    Parameters
+    ----------
+    run : Run
+    tile : int or tuple of int, optional
+        Override the lattice cell size; defaults to :func:`lattice_cellsize`.
+    min_holes : int, optional
+        Report a cell only if it has at least this many enclosed-box regions
+        (default ``1``).
+    min_hole_cells : int, optional
+        Minimum size (in boxes) for an enclosed void to count (default ``1``).
+    threshold : float, optional
+        Footprint magnitude above which a voxel is "occupied" (default ``0.0``).
+    indices : iterable of int, optional
+        Restrict the scan to these cell indices. Defaults to all cells.
+
+    Returns
+    -------
+    list of dict
+        One dict per flagged cell,
+        ``{"index": int, "nholes": int, "hole_boxes": int, "occupied_boxes": int,
+        "area": int}``, sorted by ``hole_boxes`` descending. Empty if none.
+    """
+    cellsize = lattice_cellsize(run, tile)
+    cells = run.cells
+    idxs = range(len(cells)) if indices is None else [int(i) for i in indices]
+    flagged: list[dict] = []
+    for k in idxs:
+        c = cells[k]
+        grid, flood_axes = _box_occupancy(c, cellsize, threshold=threshold)
+        if grid is None or not flood_axes:
+            continue
+        labels, n = _enclosed_background(grid, flood_axes=flood_axes)
+        if n == 0:
+            continue
+        sizes = np.bincount(labels.ravel(), minlength=n + 1)[1:]
+        big = sizes[sizes >= min_hole_cells]
+        if big.size < min_holes:
+            continue
+        flagged.append(
+            {
+                "index": int(k),
+                "nholes": int(big.size),
+                "hole_boxes": int(big.sum()),
+                "occupied_boxes": int(grid.sum()),
+                "area": int(c.area),
+            }
+        )
+    flagged.sort(key=lambda d: d["hole_boxes"], reverse=True)
+    return flagged
+
+
 def flag_overmerged(
     run: "Run",
     *,
@@ -406,4 +580,7 @@ __all__ = [
     "flag_overmerged",
     "cell_holes",
     "flag_holed",
+    "lattice_cellsize",
+    "box_holes",
+    "flag_box_holed",
 ]

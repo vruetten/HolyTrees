@@ -26,12 +26,15 @@ from __future__ import annotations
 import logging
 
 from .analysis import (
+    box_holes,
     cell_holes,
     cell_lobes,
+    flag_box_holed,
     flag_holed,
     flag_overmerged,
     label_components,
     label_components_full,
+    lattice_cellsize,
 )
 from .cells import (
     Cell,
@@ -106,6 +109,9 @@ __all__ = [
     "flag_overmerged",
     "cell_holes",
     "flag_holed",
+    "lattice_cellsize",
+    "box_holes",
+    "flag_box_holed",
     "label_components_full",
     "label_components",
     "show_image",
